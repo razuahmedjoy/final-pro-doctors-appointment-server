@@ -35,6 +35,8 @@ const verifyToken = (req, res, next) => {
 
 }
 
+
+
 // DB CONNECTION
 const { MongoClient, ServerApiVersion } = require('mongodb');
 
@@ -50,6 +52,29 @@ const connectDB = async () => {
         const serviceCollection = client.db("doctor_portal").collection("services");
         const bookingCollection = client.db("doctor_portal").collection("bookings");
         const userCollection = client.db("doctor_portal").collection("users");
+        const doctorCollection = client.db("doctor_portal").collection("doctors");
+
+
+        // middleware
+        // verifyADmin
+
+        const verifyAdmin = async (req, res, next) => {
+            const requester = req.decoded.email;
+
+            const requesterUser = await userCollection.findOne({ email: requester });
+
+            if (requesterUser.role === 'admin') {
+                next()
+            }
+            else {
+                res.status(403).send({ message: "Forbidden Access VerifyADmin" })
+            }
+        }
+
+
+
+
+
 
         /**
          * API NAMING CONVENSION
@@ -96,45 +121,24 @@ const connectDB = async () => {
 
         // make admin an user
 
-        app.put("/user/admin/:email", verifyToken, async (req, res) => {
-
-
+        app.put("/user/admin/:email", verifyToken, verifyAdmin, async (req, res) => {
 
             const email = req.params.email;
+            const filter = { email: email };
 
-            const requester = req.decoded.email;
+            const updateDoc = {
+                $set: {
+                    role: 'admin',
+                },
+            };
 
-            const requesterUser = await userCollection.findOne({ email: requester });
+            const result = await userCollection.updateOne(filter, updateDoc);
 
-            if (requesterUser.role === 'admin') {
-
-                const filter = { email: email };
-
-                const options = {
-                    upsert: true,
-                }
-
-                const updateDoc = {
-                    $set: {
-                        role: 'admin',
-                    },
-                };
-
-                const result = await userCollection.updateOne(filter, updateDoc, options);
-
-
-                res.send(result);
-
-            }
-            else {
-                res.status(403).send({ message: "Forbidden Access 2" })
-            }
-
-
-
+            res.send(result);
 
         })
 
+        // check if admin
         app.get('/admin/:email', async (req, res) => {
 
             const email = req.params.email;
@@ -146,8 +150,8 @@ const connectDB = async () => {
 
                 res.send({ admin: isAdmin });
             }
-            else{
-                res.status(403).send({message:"Forbidden access 4"});
+            else {
+                res.status(403).send({ message: "Forbidden access 4" });
             }
         })
 
@@ -155,7 +159,7 @@ const connectDB = async () => {
         app.get("/services", async (req, res) => {
             const query = {};
 
-            const cursor = serviceCollection.find(query);
+            const cursor = serviceCollection.find(query).project({ name: 1 });
             const services = await cursor.toArray();
 
             res.send(services);
@@ -259,6 +263,41 @@ const connectDB = async () => {
         })
 
 
+
+        // get all doctors
+
+        app.get("/doctors", verifyToken, verifyAdmin, async (req, res) => {
+            const doctors = await doctorCollection.find().toArray();
+
+            res.send(doctors);
+        })
+
+
+        //  add new doctor
+        app.post("/add-doctor", verifyToken, verifyAdmin, async (req, res) => {
+            const doctor = req.body;
+            console.log(doctor);
+            const result = await doctorCollection.insertOne(doctor);
+            res.send(result);
+
+
+
+
+        })
+
+        // delete a doctor
+
+        app.delete("/doctor/:email", verifyToken, verifyAdmin, async (req, res)=>{
+            const email = req.params.email;
+            const filter = {email}
+
+            const result = await doctorCollection.deleteOne(filter)
+            
+            res.send(result)
+
+        })
+
+
     }
 
     catch (err) {
@@ -271,7 +310,7 @@ const connectDB = async () => {
 connectDB().catch(console.dir);
 
 app.get('/', (req, res) => {
-    res.send("Hello from doctors server")
+    res.json({result:true})
 
 })
 
