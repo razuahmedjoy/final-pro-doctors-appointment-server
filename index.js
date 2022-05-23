@@ -4,10 +4,15 @@ const app = express();
 const port = process.env.PORT || 5000
 const jwt = require('jsonwebtoken');
 
+
 require('dotenv').config()
 
 app.use(cors());
 app.use(express.json())
+
+
+// stripe
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 
 // verifyToken
@@ -38,7 +43,7 @@ const verifyToken = (req, res, next) => {
 
 
 // DB CONNECTION
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@doctorportal.tp7ce.mongodb.net/myFirstDatabase?retryWrites=true&w=majority`;
@@ -48,11 +53,13 @@ const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology:
 const connectDB = async () => {
 
     try {
+
         await client.connect();
         const serviceCollection = client.db("doctor_portal").collection("services");
         const bookingCollection = client.db("doctor_portal").collection("bookings");
         const userCollection = client.db("doctor_portal").collection("users");
         const doctorCollection = client.db("doctor_portal").collection("doctors");
+        const paymentCollection = client.db("doctor_portal").collection("payments");
 
 
         // middleware
@@ -209,7 +216,9 @@ const connectDB = async () => {
 
             res.send(services)
         })
+        
 
+        // get booking by user
 
         app.get('/booking', verifyToken, async (req, res) => {
 
@@ -233,7 +242,10 @@ const connectDB = async () => {
 
         })
 
-        app.post('/booking', async (req, res) => {
+
+        // make a booking / appointment
+
+        app.post('/booking',verifyToken, async (req, res) => {
 
 
             const booking = req.body;
@@ -262,6 +274,20 @@ const connectDB = async () => {
 
         })
 
+        
+        // dashboard/payment/:id
+
+        app.get('/booking/:id',verifyToken, async (req, res) => {
+            
+            const id = req.params.id;
+            const query = {
+                _id:ObjectId(id),
+            }
+            const booking = await bookingCollection.findOne(query);
+            // console.log(booking);
+            res.send(booking);
+        })
+
 
 
         // get all doctors
@@ -287,14 +313,54 @@ const connectDB = async () => {
 
         // delete a doctor
 
-        app.delete("/doctor/:email", verifyToken, verifyAdmin, async (req, res)=>{
+        app.delete("/doctor/:email", verifyToken, verifyAdmin, async (req, res) => {
             const email = req.params.email;
-            const filter = {email}
+            const filter = { email }
 
             const result = await doctorCollection.deleteOne(filter)
-            
+
             res.send(result)
 
+        })
+
+
+        // payment apis and configuration
+
+        app.post('/create-payment-intent', verifyToken, async (req, res) =>{
+            
+            const service = req.body;
+            const price = service.price;
+            const amount = price * 100;
+
+            const paymentIntent = await stripe.paymentIntents.create({
+                amount:amount,
+                currency: 'usd',
+                payment_method_types:['card']
+            });
+
+            res.send({clientSecret:paymentIntent.client_secret})
+
+
+        })
+
+        // update booking object paid status
+        app.patch('/booking/:id', verifyToken, async (req,res)=>{
+            const id = req.params.id;
+            const payment = req.body
+            const query = {
+                _id:ObjectId(id),
+            }
+            const updatedDoc = {
+                $set:{
+                    paid:true,
+                    transactionId : payment.transactionId
+                }
+            }
+
+            const updateBooking = await bookingCollection.updateOne(query,updatedDoc)
+            const result = await paymentCollection.insertOne(payment)
+
+            res.send(result)
         })
 
 
@@ -310,7 +376,7 @@ const connectDB = async () => {
 connectDB().catch(console.dir);
 
 app.get('/', (req, res) => {
-    res.json({result:true})
+    res.json({ result: true })
 
 })
 
